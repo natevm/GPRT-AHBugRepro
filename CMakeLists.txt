@@ -95,51 +95,9 @@ endif()
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 
-if (NOT GPRT_IS_SUBPROJECT)
-option(GPRT_BUILD_SAMPLES "Build the Samples?" ON)
-option(GPRT_BUILD_TESTS "Build the Test Code?" OFF)
-option(BUILD_DOC "Build documentation" OFF)
-endif()
-
 add_subdirectory(3rdParty)
 
-
-# ------------------------------------------------------------------
-# gprt library itself
-# ------------------------------------------------------------------
 add_subdirectory(gprt)
 
-# ------------------------------------------------------------------
-# tutorial/samples
-# ------------------------------------------------------------------
-if (GPRT_BUILD_SAMPLES)
-  add_subdirectory(samples)
-endif()
-
-if (GPRT_BUILD_TESTS)
-  add_subdirectory(tests)
-endif()
-
-if (GPRT_IS_SUBPROJECT)
-  return()
-endif()
-
-# ------------------------------------------------------------------
-# documentation
-# ------------------------------------------------------------------
-
-if (BUILD_DOC)
-  add_subdirectory(docs)
-endif()
-
-# include(CTest)
-# if (BUILD_TESTING)
-#   enable_testing()
-# endif()
-
-# # ------------------------------------------------------------------
-# # some basic testing
-# # ------------------------------------------------------------------
-# if (GPRT_BUILD_ADVANCED_TESTS)
-#   add_subdirectory(tests)
-# endif()
+# The reproducing sample
+add_subdirectory(src)

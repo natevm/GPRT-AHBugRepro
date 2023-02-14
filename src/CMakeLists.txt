@@ -22,14 +22,14 @@
 
 embed_devicecode(
   OUTPUT_TARGET
-    s05_deviceCode
+    sample_deviceCode
   SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/deviceCode.hlsl
 )
 
-add_executable(s05_computeVertex hostCode.cpp)
-target_link_libraries(s05_computeVertex
+add_executable(sample_program hostCode.cpp)
+target_link_libraries(sample_program
   PRIVATE
-    s05_deviceCode
+    sample_deviceCode
     gprt::gprt
 )

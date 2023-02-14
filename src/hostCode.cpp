@@ -29,6 +29,8 @@
 // our shared data structures between host and device
 #include "sharedCode.h"
 
+#include "imgui.h"
+
 #define LOG(message)                                                                                                   \
   std::cout << GPRT_TERMINAL_BLUE;                                                                                     \
   std::cout << "#gprt.sample(main): " << message << std::endl;                                                         \
@@ -38,49 +40,37 @@
   std::cout << "#gprt.sample(main): " << message << std::endl;                                                         \
   std::cout << GPRT_TERMINAL_DEFAULT;
 
-extern GPRTProgram s02_deviceCode;
+extern GPRTProgram sample_deviceCode;
 
-// Vertices and indices of a cube
-const int NUM_VERTICES = 8;
-float3 vertices[NUM_VERTICES] = {{-1.f, -1.f, -1.f}, {+1.f, -1.f, -1.f}, {-1.f, +1.f, -1.f}, {+1.f, +1.f, -1.f},
-                                 {-1.f, -1.f, +1.f}, {+1.f, -1.f, +1.f}, {-1.f, +1.f, +1.f}, {+1.f, +1.f, +1.f}};
+// Vertices and radii that will be used to define spheres
+const int NUM_VERTICES = 11;
+float3 vertices[NUM_VERTICES] = {
+    {0.0f, 0.0f, 0.0f}, {0.1f, 0.0f, 0.0f}, {0.2f, 0.0f, 0.0f}, {0.3f, 0.0f, 0.0f},
+    {0.4f, 0.0f, 0.0f}, {0.5f, 0.0f, 0.0f}, {0.6f, 0.0f, 0.0f}, {0.7f, 0.0f, 0.0f},
+    {0.8f, 0.0f, 0.0f}, {0.9f, 0.0f, 0.0f}, {1.0f, 0.0f, 0.0f},
+};
 
-const int NUM_INDICES = 12;
-int3 indices[NUM_INDICES] = {{0, 1, 3}, {2, 3, 0}, {5, 7, 6}, {5, 6, 4}, {0, 4, 5}, {0, 5, 1},
-                             {2, 3, 7}, {2, 7, 6}, {1, 5, 7}, {1, 7, 3}, {4, 0, 2}, {4, 2, 6}};
-
-// Several affine transformation matrices to place instances of our cube in the
-// world. The first, second, third and third column represent "right", "up", and
-// "forward" basis respectively. The last column represents the position.
-const int NUM_INSTANCES = 3;
-float transforms[NUM_INSTANCES][12] = {{0.5f, 0.0f, 0.0f, -1.5f, 0.0f, 0.5f, 0.0f, 0.0f, 0.0f, 0.0f, 0.5f, 0.0f},
-                                       {0.5f, 0.0f, 0.0f, 0.0f, 0.0f, 0.5f, 0.0f, 0.0f, 0.0f, 0.0f, 0.5f, 0.0f},
-                                       {0.5f, 0.0f, 0.0f, 1.5f, 0.0f, 0.5f, 0.0f, 0.0f, 0.0f, 0.0f, 0.5f, 0.0f}};
+float radii[NUM_VERTICES] = {.015f, .025f, .035f, .045f, .055f, .065f, .055f, .045f, .035f, .025f, .015f};
 
 // initial image resolution
 const int2 fbSize = {1400, 460};
 
 // final image output
-const char *outFileName = "s02-instances.png";
+const char *outFileName = "sample_program.png";
 
 // Initial camera parameters
-float3 lookFrom = {-0.f, 2.f, -3.f};
-float3 lookAt = {0.f, 0.f, 0.f};
-float3 lookUp = {0.f, 1.f, 0.f};
+float3 lookFrom = {0.5f, 0.0f, 0.6f};
+float3 lookAt = {0.5f, 0.f, 0.f};
+float3 lookUp = {0.f, -1.f, 0.f};
 float cosFovy = 0.66f;
 
 #include <iostream>
 int
 main(int ac, char **av) {
-  // This example is very similar to the last, but with one key difference.
-  // Now, we create multiple "instances", or copies, of the same bottom level
-  // acceleration structure in one top level tree.
-  LOG("gprt example '" << av[0] << "' starting up");
-
   // create a context on the first device:
-  gprtRequestWindow(fbSize.x, fbSize.y, "S02 Instances");
-  GPRTContext context = gprtContextCreate();
-  GPRTModule module = gprtModuleCreate(context, s02_deviceCode);
+  gprtRequestWindow(fbSize.x, fbSize.y, "Sample Program");
+  GPRTContext context = gprtContextCreate(nullptr, 1);
+  GPRTModule module = gprtModuleCreate(context, sample_deviceCode);
 
   // ##################################################################
   // set up all the GPU kernels we want to run
@@ -89,11 +79,18 @@ main(int ac, char **av) {
   // -------------------------------------------------------
   // declare geometry type
   // -------------------------------------------------------
-  GPRTGeomTypeOf<TrianglesGeomData> trianglesGeomType = gprtGeomTypeCreate<TrianglesGeomData>(context, GPRT_TRIANGLES);
-  gprtGeomTypeSetClosestHitProg(trianglesGeomType, 0, module, "TriangleMesh");
+  GPRTGeomTypeOf<SphereGeomData> sphereGeomType = gprtGeomTypeCreate<SphereGeomData>(context, GPRT_AABBS);
+  gprtGeomTypeSetAnyHitProg(sphereGeomType, 0, module, "SphereAnyHit");
+  gprtGeomTypeSetIntersectionProg(sphereGeomType, 0, module, "SphereIntersection");
+
 
   // -------------------------------------------------------
-  // set up miss prog
+  // set up sphere bounding box compute program
+  // -------------------------------------------------------
+  GPRTComputeOf<SphereBoundsData> boundsProgram = gprtComputeCreate<SphereBoundsData>(context, module, "SphereBounds");
+
+  // -------------------------------------------------------
+  // set up miss
   // -------------------------------------------------------
   GPRTMissOf<MissProgData> miss = gprtMissCreate<MissProgData>(context, module, "miss");
 
@@ -103,64 +100,71 @@ main(int ac, char **av) {
   GPRTRayGenOf<RayGenData> rayGen = gprtRayGenCreate<RayGenData>(context, module, "simpleRayGen");
 
   // ##################################################################
-  // set the parameters for those kernels
+  // set the parameters for our compute kernel
+  // ##################################################################
+
+  // ------------------------------------------------------------------
+  // aabb mesh
+  // ------------------------------------------------------------------
+  GPRTBufferOf<float3> vertexBuffer = gprtDeviceBufferCreate<float3>(context, NUM_VERTICES, vertices);
+  GPRTBufferOf<float> radiusBuffer = gprtDeviceBufferCreate<float>(context, NUM_VERTICES, radii);
+  GPRTBufferOf<float3> aabbPositionsBuffer = gprtDeviceBufferCreate<float3>(context, NUM_VERTICES * 2, nullptr);
+
+  GPRTGeomOf<SphereGeomData> aabbGeom = gprtGeomCreate(context, sphereGeomType);
+  gprtAABBsSetPositions(aabbGeom, aabbPositionsBuffer, NUM_VERTICES);
+
+  SphereGeomData *geomData = gprtGeomGetParameters(aabbGeom);
+  geomData->vertex = gprtBufferGetHandle(vertexBuffer);
+  geomData->radius = gprtBufferGetHandle(radiusBuffer);
+
+  // to reproduce the bug
+  geomData->terminateEarly = false;
+
+  SphereBoundsData *boundsData = gprtComputeGetParameters(boundsProgram);
+  boundsData->vertex = gprtBufferGetHandle(vertexBuffer);
+  boundsData->radius = gprtBufferGetHandle(radiusBuffer);
+  boundsData->aabbs = gprtBufferGetHandle(aabbPositionsBuffer);
+
+  // compute AABBs in parallel with a compute shader
+  gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
+
+  // Launch the compute kernel, which will populate our aabbPositionsBuffer
+  gprtComputeLaunch1D(context, boundsProgram, NUM_VERTICES);
+
+  // Now that the aabbPositionsBuffer is filled, we can compute our AABB
+  // acceleration structure
+  GPRTAccel aabbAccel = gprtAABBAccelCreate(context, 1, &aabbGeom);
+  gprtAccelBuild(context, aabbAccel);
+
+  GPRTAccel world = gprtInstanceAccelCreate(context, 1, &aabbAccel);
+  gprtAccelBuild(context, world);
+
+  // ##################################################################
+  // set the parameters for the rest of our kernels
   // ##################################################################
 
   // Setup pixel frame buffer
-  GPRTBufferOf<uint32_t> frameBuffer = gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
+  GPRTBuffer frameBuffer = gprtDeviceBufferCreate(context, sizeof(uint32_t), fbSize.x * fbSize.y);
+
+  auto guiColorAttachment = gprtDeviceTextureCreate<uint32_t>(
+      context, GPRT_IMAGE_TYPE_2D, GPRT_FORMAT_R8G8B8A8_SRGB, fbSize.x, fbSize.y, 1, false, nullptr);
+  auto guiDepthAttachment = gprtDeviceTextureCreate<float>(
+      context, GPRT_IMAGE_TYPE_2D, GPRT_FORMAT_D32_SFLOAT, fbSize.x, fbSize.y, 1, false, nullptr);
+  gprtGuiSetRasterAttachments(context, guiColorAttachment, guiDepthAttachment);
+
 
   // Raygen program frame buffer
   RayGenData *rayGenData = gprtRayGenGetParameters(rayGen);
   rayGenData->frameBuffer = gprtBufferGetHandle(frameBuffer);
+  rayGenData->guiTexture = gprtTextureGetHandle(guiColorAttachment);
+  rayGenData->world = gprtAccelGetHandle(world);
 
   // Miss program checkerboard background colors
   MissProgData *missData = gprtMissGetParameters(miss);
   missData->color0 = float3(0.1f, 0.1f, 0.1f);
   missData->color1 = float3(0.0f, 0.0f, 0.0f);
 
-  LOG("building geometries ...");
-
-  // Create our cube mesh
-  GPRTBufferOf<float3> vertexBuffer = gprtDeviceBufferCreate<float3>(context, NUM_VERTICES, vertices);
-  GPRTBufferOf<int3> indexBuffer = gprtDeviceBufferCreate<int3>(context, NUM_INDICES, indices);
-  GPRTGeomOf<TrianglesGeomData> trianglesGeom = gprtGeomCreate<TrianglesGeomData>(context, trianglesGeomType);
-  gprtTrianglesSetVertices(trianglesGeom, vertexBuffer, NUM_VERTICES);
-  gprtTrianglesSetIndices(trianglesGeom, indexBuffer, NUM_INDICES);
-
-  // Here, we additionally set the vertex and index parameters of our goemetry
-  // so that we can access these buffers when a ray hits the mesh
-  TrianglesGeomData *triangleData = gprtGeomGetParameters(trianglesGeom);
-  triangleData->vertex = gprtBufferGetHandle(vertexBuffer);
-  triangleData->index = gprtBufferGetHandle(indexBuffer);
-
-  // Place that single cube mesh in a bottom level acceleration structure
-  GPRTAccel trianglesAccel = gprtTrianglesAccelCreate(context, 1, &trianglesGeom);
-  gprtAccelBuild(context, trianglesAccel);
-
-  // We will now create three instances of that cube mesh. On the gpu,
-  // we will use the "instance ID" to determine what color each cube should be.
-
-  // First, we create a list of BLAS objects
-  GPRTAccel triangleAccelRefs[NUM_INSTANCES] = {trianglesAccel, trianglesAccel, trianglesAccel};
-
-  // Then, we create a transform buffer, one transform per instance.
-  // These transforms are defined at the top of our program, in the "transforms"
-  // array referenced by the last parameter here.
-  GPRTBufferOf<float3x4> transformBuffer = gprtDeviceBufferCreate<float3x4>(context, NUM_INSTANCES, transforms);
-
-  // Finally, we create a top level acceleration structure here.
-  GPRTAccel world = gprtInstanceAccelCreate(context, NUM_INSTANCES, triangleAccelRefs);
-  // Similar to how we set the vertex and index buffers on triangle primitives,
-  // we set the transforms buffer here for instance primitives
-  gprtInstanceAccelSet3x4Transforms(world, transformBuffer);
-  gprtAccelBuild(context, world);
-
-  // Here, we place a reference to our TLAS in the ray generation
-  // kernel's parameters, so that we can access that tree when
-  // we go to trace our rays.
-  rayGenData->world = gprtAccelGetHandle(world);
-
-  gprtBuildShaderBindingTable(context);
+  gprtBuildShaderBindingTable(context, GPRT_SBT_ALL);
 
   // ##################################################################
   // now that everything is ready: launch it ....
@@ -172,6 +176,9 @@ main(int ac, char **av) {
   double xpos = 0.f, ypos = 0.f;
   double lastxpos, lastypos;
   do {
+    ImGuiIO &io = ImGui::GetIO();
+    ImGui::NewFrame();
+
     float speed = .001f;
     lastxpos = xpos;
     lastypos = ypos;
@@ -184,7 +191,7 @@ main(int ac, char **av) {
 
     // If we click the mouse, we should rotate the camera
     // Here, we implement some simple camera controls
-    if (state == GPRT_PRESS || firstFrame) {
+    if (state == GPRT_PRESS && !io.WantCaptureMouse || firstFrame) {
       firstFrame = false;
       float4 position = {lookFrom.x, lookFrom.y, lookFrom.z, 1.f};
       float4 pivot = {lookAt.x, lookAt.y, lookAt.z, 1.0};
@@ -222,10 +229,20 @@ main(int ac, char **av) {
       raygenData->camera.dir_00 = camera_d00;
       raygenData->camera.dir_du = camera_ddu;
       raygenData->camera.dir_dv = camera_ddv;
-
-      // Use this to upload all set parameters to our ray tracing device
-      gprtBuildShaderBindingTable(context, GPRT_SBT_RAYGEN);
     }
+
+    static int choice = 0;
+    ImGui::RadioButton("Don't terminate traversal early?", &choice, 0);
+    ImGui::RadioButton("Terminate Traversal Early?", &choice, 1);
+    SphereGeomData *geomData = gprtGeomGetParameters(aabbGeom);
+    geomData->terminateEarly = choice;
+    ImGui::EndFrame();
+    
+    gprtBuildShaderBindingTable(context); 
+
+    gprtTextureClear(guiDepthAttachment);
+    gprtTextureClear(guiColorAttachment);
+    gprtGuiRasterize(context);
 
     // Calls the GPU raygen kernel function
     gprtRayGenLaunch2D(context, rayGen, fbSize.x, fbSize.y);
@@ -237,28 +254,23 @@ main(int ac, char **av) {
   while (!gprtWindowShouldClose(context));
 
   // Save final frame to an image
-  LOG("done with launch, writing frame buffer to " << outFileName);
   gprtBufferSaveImage(frameBuffer, fbSize.x, fbSize.y, outFileName);
-  LOG_OK("written rendered frame buffer to file " << outFileName);
 
   // ##################################################################
   // and finally, clean up
   // ##################################################################
 
-  LOG("cleaning up ...");
-
   gprtBufferDestroy(vertexBuffer);
-  gprtBufferDestroy(indexBuffer);
+  gprtBufferDestroy(radiusBuffer);
+  gprtBufferDestroy(aabbPositionsBuffer);
   gprtBufferDestroy(frameBuffer);
-  gprtBufferDestroy(transformBuffer);
   gprtRayGenDestroy(rayGen);
   gprtMissDestroy(miss);
-  gprtAccelDestroy(trianglesAccel);
+  gprtComputeDestroy(boundsProgram);
+  gprtAccelDestroy(aabbAccel);
   gprtAccelDestroy(world);
-  gprtGeomDestroy(trianglesGeom);
-  gprtGeomTypeDestroy(trianglesGeomType);
+  gprtGeomDestroy(aabbGeom);
+  gprtGeomTypeDestroy(sphereGeomType);
   gprtModuleDestroy(module);
   gprtContextDestroy(context);
-
-  LOG_OK("seems all went OK; app is done, this should be the last output ...");
 }

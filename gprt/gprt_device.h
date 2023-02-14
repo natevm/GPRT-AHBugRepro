@@ -67,7 +67,9 @@ make_bgra(float3 color) {
 }
 
 inline uint32_t
-make_bgra(const float4 color) {
+make_bgra(float4 color) {
+  float gamma = 2.2;
+  color.rgb = pow(color.rgb, float3(1.0f / gamma, 1.0f / gamma, 1.0f / gamma));
   return (make_8bit(color.z) << 0) + (make_8bit(color.y) << 8) + (make_8bit(color.x) << 16) +
          (make_8bit(color.w) << 24);
 }
